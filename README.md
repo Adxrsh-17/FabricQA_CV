@@ -37,20 +37,24 @@ FabricQA/
 ├── requirements.txt            # Project dependencies
 ├── pytest.ini                  # Pytest configuration
 ├── inspectors/
-│   ├── __init__.py             # Package exports (unified_processor)
+│   ├── __init__.py             # Package exports (unified_processor, TextureInspector)
 │   ├── unified_processor.py    # Orchestrator running parallel CV pipelines
 │   ├── geometry.py             # Polygon approximation & per-defect geometric/photometric metrics
-│   ├── classic_edge.py         # Adaptive background subtraction + CLAHE + Sauvola (Hole, Tear, Oil Stain)
+│   ├── classic_edge.py         # Adaptive background subtraction + CLAHE + Sauvola (Hole, Tear, Oil Stain, Puckering)
 │   ├── logic_spectral.py       # Multi-resolution FFT (512/256/128) + DWT db4 (Slub, Skip/Miss Stitch)
-│   └── logic_seam.py           # Hough deskew + thread mask + 1D projection profiling (Seam defects)
+│   ├── logic_seam.py           # Hough deskew + thread mask + 1D projection profiling (Seam defects)
+│   └── texture_inspector.py    # 18-filter Gabor bank + sliding GLCM Haralick + LBP/Entropy (Weave Irregularity, Snag/Knot)
 ├── eval/
 │   ├── run_eval.py             # Evaluation harness (AUROC, F1, FPR, IoU, 1024x1024 latency benchmark)
+│   ├── run_ablation.py         # Phase 2 Texture feature bank ablation suite
 │   ├── baseline.md             # Baseline evaluation metrics on AITEX dataset
 │   ├── phase1_eval.md          # Phase 1 evaluation metrics after measurement foundation
+│   ├── phase2_ablation.md      # Phase 2 ablation study results (LBP vs Gabor vs GLCM vs Combined)
 │   └── baseline_results.csv    # Per-sample predictions and metrics
 └── tests/
     ├── test_inspectors.py      # Contract & regression tests for inspectors
     ├── test_geometry.py        # Polygon, geometric & photometric unit tests
+    ├── test_texture.py         # Gabor caching, GLCM levels, and LBP unit tests
     └── test_eval_harness.py    # Evaluation harness unit tests
 ```
 
@@ -61,6 +65,7 @@ FabricQA/
 | **Classic Edge** (`classic_edge.py`) | Adaptive background subtraction + Sauvola dynamic thresholding + morphology | Holes, Tears, Oil Stains, Puckering | Implemented & Wired |
 | **Logic Spectral** (`logic_spectral.py`) | Multi-scale FFT Spectral Residual (512, 256, 128) + DWT (`db4`) detail decomposition | Slub, Skip/Miss Stitch | Implemented & Wired |
 | **Logic Seam** (`logic_seam.py`) | Hough transform deskewing + stitch segmentation + 1D projection profile + 1D FFT periodicity | Skip Stitch, Broken Stitch, Run-off Stitch, Crooked Stitch | Implemented & Wired |
+| **Texture Inspector** (`texture_inspector.py`) | 18-filter real Gabor bank (6 orientations x 3 scales) + Sliding GLCM (contrast, correlation, energy, homogeneity) + LBP uniform & Shannon entropy | Weave Irregularity, Snag / Knot | Implemented & Wired |
 | **Unified Processor** (`unified_processor.py`) | Multi-pipeline orchestration, defect deduplication, taxonomy classification | All structural and surface categories | Implemented & Wired |
 
 ## Installation
