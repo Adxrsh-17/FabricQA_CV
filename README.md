@@ -34,34 +34,33 @@ It can identify and classify:
 
 ```
 FabricQA/
-├── app.py                      # Streamlit dashboard (UI + routing)
-├── config.py                   # Global settings (GLCM, Seam, System)
-├── requirements.txt            # Pinned dependencies
+├── app.py                      # Streamlit dashboard (UI + inspection modes + heatmaps)
+├── config.py                   # Pipeline settings (Classic, Spectral, Seam, Texture)
+├── requirements.txt            # Project dependencies
+├── pytest.ini                  # Pytest configuration
 ├── inspectors/
-│   ├── __init__.py             # Package exports
-│   ├── texture_inspector.py    # LBP + Entropy + Gabor filter bank
-│   ├── spectral_inspector.py   # Multi-res FFT Spectral Residual
-│   ├── seam_inspector.py       # Stitch gap analysis via projection
-│   ├── edge_inspector.py       # Laplacian variance + Hough lines
-│   └── reference_inspector.py  # ORB alignment + pixel diff
-├── tests/
-│   ├── test_texture.py
-│   ├── test_spectral.py
-│   ├── test_seam.py
-│   ├── test_edge.py
-│   └── test_reference.py
-└── Dataset/                    # Sample images (train/valid/test)
+│   ├── __init__.py             # Package exports (unified_processor)
+│   ├── unified_processor.py    # Orchestrator running parallel CV pipelines
+│   ├── classic_edge.py         # Adaptive background subtraction + CLAHE + Sauvola (Hole, Tear, Oil Stain)
+│   ├── logic_spectral.py       # Multi-resolution FFT (512/256/128) + DWT db4 (Slub, Skip/Miss Stitch)
+│   └── logic_seam.py           # Hough deskew + thread mask + 1D projection profiling (Seam defects)
+├── eval/
+│   ├── run_eval.py             # Evaluation harness (AUROC, F1, FPR, IoU, 1024x1024 latency benchmark)
+│   ├── baseline.md             # Baseline evaluation metrics on AITEX dataset
+│   └── baseline_results.csv    # Per-sample predictions and metrics
+└── tests/
+    ├── test_inspectors.py      # Contract & regression tests for inspectors
+    └── test_eval_harness.py    # Evaluation harness unit tests
 ```
 
 ## How It Works
 
-| Inspector | Algorithm | Detects |
-|-----------|-----------|---------|
-| **Texture** | LBP + Local Entropy + Gabor bank (18 filters) + Multi-scale pyramid | Holes, stains, cuts, texture anomalies |
-| **Spectral** | FFT Spectral Residual at 3 resolutions + Z-score thresholding | Repetitive pattern disruptions |
-| **Seam** | CLAHE + Canny + HoughLines deskew + Projection profile | Skip stitches, thread gaps |
-| **Edge** | Laplacian variance patches + Hough line spacing regularity | Wrinkles, folds, broken weave |
-| **Reference** | ORB feature matching + Homography alignment + Pixel diff | Any deviation from golden sample |
+| Inspector | Algorithm | Detects | Status |
+|-----------|-----------|---------|:---:|
+| **Classic Edge** (`classic_edge.py`) | Adaptive background subtraction + Sauvola dynamic thresholding + morphology | Holes, Tears, Oil Stains, Puckering | Implemented & Wired |
+| **Logic Spectral** (`logic_spectral.py`) | Multi-scale FFT Spectral Residual (512, 256, 128) + DWT (`db4`) detail decomposition | Slub, Skip/Miss Stitch | Implemented & Wired |
+| **Logic Seam** (`logic_seam.py`) | Hough transform deskewing + stitch segmentation + 1D projection profile + 1D FFT periodicity | Skip Stitch, Broken Stitch, Run-off Stitch, Crooked Stitch | Implemented & Wired |
+| **Unified Processor** (`unified_processor.py`) | Multi-pipeline orchestration, defect deduplication, taxonomy classification | All structural and surface categories | Implemented & Wired |
 
 ## Installation
 
