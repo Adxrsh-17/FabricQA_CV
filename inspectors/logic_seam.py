@@ -242,7 +242,7 @@ class LogicSeamInspector:
         entropy = -np.sum(hist * np.log2(hist))
         return entropy
 
-    def detect_defects(self, img_buffer: BinaryIO) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    def detect_defects(self, img_buffer: BinaryIO, mm_per_pixel: Optional[float] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         img_orig, img_small, img_gray, scale = self._preprocess(img_buffer)
         rot_img, _ = self._deskew(img_gray)
         thread_mask, proj = self._extract_stitch_mask(rot_img)
@@ -264,14 +264,39 @@ class LogicSeamInspector:
         defect_log: List[Dict[str, Any]] = []
         for d in all_raw:
             confidence = min(99, max(10, d.get("score", 50)))
+            ox = int(d["x"] / scale)
+            oy = int(d["y"] / scale)
+            ow = max(1, int(d["w"] / scale))
+            oh = max(1, int(d["h"] / scale))
+            real_area = int(d["w"] * d["h"] / (scale ** 2))
+            poly = [[ox, oy], [ox + ow, oy], [ox + ow, oy + oh], [ox, oy + oh]]
+            peri = float(2 * (ow + oh))
+            circ = min(1.0, max(0.0, (4.0 * np.pi * real_area) / max(peri ** 2, 1e-6)))
+
+            area_mm2 = round(real_area * (mm_per_pixel ** 2), 3) if mm_per_pixel else None
+            major_mm = round(max(ow, oh) * mm_per_pixel, 2) if mm_per_pixel else None
+            major_in = round((max(ow, oh) * mm_per_pixel) / 25.4, 3) if mm_per_pixel else None
+
             defect_log.append({
                 "Type": d["type"],
-                "Area (px)": int(d["w"] * d["h"] / (scale ** 2)),
+                "Area (px)": real_area,
                 "Quality Score": f"{confidence}%",
-                "bbox_x": int(d["x"] / scale),
-                "bbox_y": int(d["y"] / scale),
-                "bbox_w": int(d["w"] / scale),
-                "bbox_h": int(d["h"] / scale),
+                "bbox_x": ox,
+                "bbox_y": oy,
+                "bbox_w": ow,
+                "bbox_h": oh,
+                "polygon": poly,
+                "Perimeter (px)": round(peri, 1),
+                "Circularity": round(circ, 3),
+                "Aspect Ratio": round(ow / max(oh, 1), 2),
+                "Major Axis (px)": round(float(max(ow, oh)), 1),
+                "Minor Axis (px)": round(float(min(ow, oh)), 1),
+                "Delta RGB": 0.0,
+                "Delta HSV": 0.0,
+                "Area (mm2)": area_mm2,
+                "Major Axis (mm)": major_mm,
+                "Major Axis (in)": major_in,
+                "Calibrated": bool(mm_per_pixel),
                 "Pipeline": "Logic",
                 "Category": "Structural"
             })
