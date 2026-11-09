@@ -1,0 +1,6 @@
+mode,auroc,f1,fpr,tp,fp,tn,fn,mean_strip_ms,bench_1024_ms,label
+none,0.6272,0.6667,1.0,30,30,0,0,1714.43,4493.43,Phase 1 Baseline (No Texture)
+lbp_entropy,0.6394,0.6667,1.0,30,30,0,0,2318.82,7022.41,LBP + Local Entropy Only
+gabor,0.6394,0.6667,1.0,30,30,0,0,3232.52,11254.15,+ Gabor Filter Bank (18 filters)
+glcm,0.71,0.6667,1.0,30,30,0,0,6095.38,9784.9,+ GLCM Haralick Features (32 levels)
+all,0.6422,0.6667,1.0,30,30,0,0,6370.64,11575.26,All Combined (LBP + Gabor + GLCM)

@@ -20,48 +20,53 @@ It can identify and classify:
 * **Weave Irregularities** (Broken weave lines)
 
 ## Key Features
-* **5 Inspection Modes:** Full, Texture, Spectral, Seam, Edge/Structural
-* **Batch Processing:** Upload multiple images and get a combined CSV report
-* **Inspection History:** Track quality trends over time with charts
-* **Gabor Filter Bank:** 18 directional filters to catch diagonal/oriented defects
-* **Multi-Resolution FFT:** Spectral analysis at multiple scales for micro & macro defects
-* **Smart Confidence Scores:** Z-score based confidence metrics (not hardcoded)
-* **Auto-Calibration:** Statistical thresholding adapts to each image
-* **Live Camera:** Real-time webcam inspection
-* **Automated Reporting:** Downloadable CSV defect reports
+* **Dual Classical & Logic Pipeline:** Adaptive background subtraction, Sauvola thresholding, multi-scale FFT (512/256/128), and DWT (`db4`) detail analysis
+* **Precise Polygon Contour Masks:** Sub-pixel Douglas-Peucker polygon approximation and alpha-blended defect segmentation
+* **Per-Defect Geometry & Photometrics:** Exact Area, Perimeter, Circularity, Aspect Ratio, Major Axis length, and local Euclidean color deltas ($\Delta\text{RGB}$, $\Delta\text{HSV}$)
+* **Optional Optical Calibration:** Millimeter-per-pixel (`mm_per_pixel`) scaling with automatic conversion between pixel and physical metrics ($\text{mm}^2$, inches)
+* **Interactive UI:** Streamlit dashboard with overlay style toggles (Polygons / Boxes / Both), before/after comparison slider, and diagnostic frequency saliency maps
+* **Batch Processing & Heatmaps:** Multi-image quality reports with defect spatial density clustering
+* **Automated Test Suite & Benchmarking:** Pytest verification and standardized AITEX dataset evaluation harness
 
 ## Architecture
 
 ```
 FabricQA/
-├── app.py                      # Streamlit dashboard (UI + routing)
-├── config.py                   # Global settings (GLCM, Seam, System)
-├── requirements.txt            # Pinned dependencies
+├── app.py                      # Streamlit dashboard (UI + inspection modes + heatmaps)
+├── config.py                   # Pipeline settings & physical calibration parameters
+├── requirements.txt            # Project dependencies
+├── pytest.ini                  # Pytest configuration
 ├── inspectors/
-│   ├── __init__.py             # Package exports
-│   ├── texture_inspector.py    # LBP + Entropy + Gabor filter bank
-│   ├── spectral_inspector.py   # Multi-res FFT Spectral Residual
-│   ├── seam_inspector.py       # Stitch gap analysis via projection
-│   ├── edge_inspector.py       # Laplacian variance + Hough lines
-│   └── reference_inspector.py  # ORB alignment + pixel diff
-├── tests/
-│   ├── test_texture.py
-│   ├── test_spectral.py
-│   ├── test_seam.py
-│   ├── test_edge.py
-│   └── test_reference.py
-└── Dataset/                    # Sample images (train/valid/test)
+│   ├── __init__.py             # Package exports (unified_processor, TextureInspector)
+│   ├── unified_processor.py    # Orchestrator running parallel CV pipelines
+│   ├── geometry.py             # Polygon approximation & per-defect geometric/photometric metrics
+│   ├── classic_edge.py         # Adaptive background subtraction + CLAHE + Sauvola (Hole, Tear, Oil Stain, Puckering)
+│   ├── logic_spectral.py       # Multi-resolution FFT (512/256/128) + DWT db4 (Slub, Skip/Miss Stitch)
+│   ├── logic_seam.py           # Hough deskew + thread mask + 1D projection profiling (Seam defects)
+│   └── texture_inspector.py    # 18-filter Gabor bank + sliding GLCM Haralick + LBP/Entropy (Weave Irregularity, Snag/Knot)
+├── eval/
+│   ├── run_eval.py             # Evaluation harness (AUROC, F1, FPR, IoU, 1024x1024 latency benchmark)
+│   ├── run_ablation.py         # Phase 2 Texture feature bank ablation suite
+│   ├── baseline.md             # Baseline evaluation metrics on AITEX dataset
+│   ├── phase1_eval.md          # Phase 1 evaluation metrics after measurement foundation
+│   ├── phase2_ablation.md      # Phase 2 ablation study results (LBP vs Gabor vs GLCM vs Combined)
+│   └── baseline_results.csv    # Per-sample predictions and metrics
+└── tests/
+    ├── test_inspectors.py      # Contract & regression tests for inspectors
+    ├── test_geometry.py        # Polygon, geometric & photometric unit tests
+    ├── test_texture.py         # Gabor caching, GLCM levels, and LBP unit tests
+    └── test_eval_harness.py    # Evaluation harness unit tests
 ```
 
 ## How It Works
 
-| Inspector | Algorithm | Detects |
-|-----------|-----------|---------|
-| **Texture** | LBP + Local Entropy + Gabor bank (18 filters) + Multi-scale pyramid | Holes, stains, cuts, texture anomalies |
-| **Spectral** | FFT Spectral Residual at 3 resolutions + Z-score thresholding | Repetitive pattern disruptions |
-| **Seam** | CLAHE + Canny + HoughLines deskew + Projection profile | Skip stitches, thread gaps |
-| **Edge** | Laplacian variance patches + Hough line spacing regularity | Wrinkles, folds, broken weave |
-| **Reference** | ORB feature matching + Homography alignment + Pixel diff | Any deviation from golden sample |
+| Inspector | Algorithm | Detects | Status |
+|-----------|-----------|---------|:---:|
+| **Classic Edge** (`classic_edge.py`) | Adaptive background subtraction + Sauvola dynamic thresholding + morphology | Holes, Tears, Oil Stains, Puckering | Implemented & Wired |
+| **Logic Spectral** (`logic_spectral.py`) | Multi-scale FFT Spectral Residual (512, 256, 128) + DWT (`db4`) detail decomposition | Slub, Skip/Miss Stitch | Implemented & Wired |
+| **Logic Seam** (`logic_seam.py`) | Hough transform deskewing + stitch segmentation + 1D projection profile + 1D FFT periodicity | Skip Stitch, Broken Stitch, Run-off Stitch, Crooked Stitch | Implemented & Wired |
+| **Texture Inspector** (`texture_inspector.py`) | 18-filter real Gabor bank (6 orientations x 3 scales) + Sliding GLCM (contrast, correlation, energy, homogeneity) + LBP uniform & Shannon entropy | Weave Irregularity, Snag / Knot | Implemented & Wired |
+| **Unified Processor** (`unified_processor.py`) | Multi-pipeline orchestration, defect deduplication, taxonomy classification | All structural and surface categories | Implemented & Wired |
 
 ## Installation
 

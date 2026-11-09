@@ -55,6 +55,8 @@ dist/
 *.pyc
 *.pyo
 Dataset/
+data/
+*.zip
 inspection_history.json
 feedback_log.json
 

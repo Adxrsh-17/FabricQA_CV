@@ -33,7 +33,10 @@ class LogicSeamInspector:
 
         angles: List[float] = []
         for line in lines:
-            x1, y1, x2, y2 = line[0]
+            pts = np.asarray(line).reshape(-1)
+            if len(pts) < 4:
+                continue
+            x1, y1, x2, y2 = pts[:4]
             angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
             if abs(angle) < 45 and abs(angle) > 0.5:
                 angles.append(angle)
@@ -239,28 +242,61 @@ class LogicSeamInspector:
         entropy = -np.sum(hist * np.log2(hist))
         return entropy
 
-    def detect_defects(self, img_buffer: BinaryIO) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    def detect_defects(self, img_buffer: BinaryIO, mm_per_pixel: Optional[float] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         img_orig, img_small, img_gray, scale = self._preprocess(img_buffer)
         rot_img, _ = self._deskew(img_gray)
         thread_mask, proj = self._extract_stitch_mask(rot_img)
 
+        viz_maps = {
+            "logic_seam_map": rot_img,
+            "grayscale_clahe": img_gray,
+            "projection_profile": proj,
+            "binary_thread_mask": thread_mask,
+            "deskewed_image": rot_img,
+        }
+
         stitch_density = np.count_nonzero(thread_mask) / max(thread_mask.shape[0] * thread_mask.shape[1], 1)
         if stitch_density < 0.015 or stitch_density > 0.35:
-            return [], rot_img
+            return [], viz_maps
 
         all_raw = self._detect_projection_defects(proj, rot_img) + self._detect_crooked(thread_mask) + self._detect_puckering(proj, rot_img)
 
         defect_log: List[Dict[str, Any]] = []
         for d in all_raw:
             confidence = min(99, max(10, d.get("score", 50)))
+            ox = int(d["x"] / scale)
+            oy = int(d["y"] / scale)
+            ow = max(1, int(d["w"] / scale))
+            oh = max(1, int(d["h"] / scale))
+            real_area = int(d["w"] * d["h"] / (scale ** 2))
+            poly = [[ox, oy], [ox + ow, oy], [ox + ow, oy + oh], [ox, oy + oh]]
+            peri = float(2 * (ow + oh))
+            circ = min(1.0, max(0.0, (4.0 * np.pi * real_area) / max(peri ** 2, 1e-6)))
+
+            area_mm2 = round(real_area * (mm_per_pixel ** 2), 3) if mm_per_pixel else None
+            major_mm = round(max(ow, oh) * mm_per_pixel, 2) if mm_per_pixel else None
+            major_in = round((max(ow, oh) * mm_per_pixel) / 25.4, 3) if mm_per_pixel else None
+
             defect_log.append({
                 "Type": d["type"],
-                "Area (px)": int(d["w"] * d["h"] / (scale ** 2)),
+                "Area (px)": real_area,
                 "Quality Score": f"{confidence}%",
-                "bbox_x": int(d["x"] / scale),
-                "bbox_y": int(d["y"] / scale),
-                "bbox_w": int(d["w"] / scale),
-                "bbox_h": int(d["h"] / scale),
+                "bbox_x": ox,
+                "bbox_y": oy,
+                "bbox_w": ow,
+                "bbox_h": oh,
+                "polygon": poly,
+                "Perimeter (px)": round(peri, 1),
+                "Circularity": round(circ, 3),
+                "Aspect Ratio": round(ow / max(oh, 1), 2),
+                "Major Axis (px)": round(float(max(ow, oh)), 1),
+                "Minor Axis (px)": round(float(min(ow, oh)), 1),
+                "Delta RGB": 0.0,
+                "Delta HSV": 0.0,
+                "Area (mm2)": area_mm2,
+                "Major Axis (mm)": major_mm,
+                "Major Axis (in)": major_in,
+                "Calibrated": bool(mm_per_pixel),
                 "Pipeline": "Logic",
                 "Category": "Structural"
             })

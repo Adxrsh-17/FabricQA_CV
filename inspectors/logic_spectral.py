@@ -2,8 +2,9 @@
 import cv2
 import numpy as np
 import pywt
-from typing import Tuple, List, Dict, Any, BinaryIO
-from config import LOGIC_SPECTRAL_SETTINGS
+from typing import Tuple, List, Dict, Any, BinaryIO, Optional
+from config import LOGIC_SPECTRAL_SETTINGS, GEOMETRY_SETTINGS
+from inspectors.geometry import extract_defect_geometry
 
 class LogicSpectralInspector:
     """PIPELINE 2: Detects Slub and Skip/Miss Stitch using FFT+DWT Saliency."""
@@ -66,7 +67,12 @@ class LogicSpectralInspector:
         reconstructed = cv2.resize(reconstructed, (w, h))
         return cv2.normalize(reconstructed, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    def detect_defects(self, img_buffer: BinaryIO, sensitivity: float = 2.0) -> Tuple[List[Dict[str, Any]], Dict[str, np.ndarray]]:
+    def detect_defects(
+        self,
+        img_buffer: BinaryIO,
+        sensitivity: float = 2.0,
+        mm_per_pixel: Optional[float] = None,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, np.ndarray]]:
         original, img_small, img_gray, scale = self._preprocess(img_buffer)
         
         fft_scales = [512, 256, 128]
@@ -94,6 +100,8 @@ class LogicSpectralInspector:
         self.defects = []
         proc_h, proc_w = img_gray.shape[:2]
         min_area = max(300, int(proc_h * proc_w * 0.004))
+        boundary_margin = max(6, int(proc_w * LOGIC_SPECTRAL_SETTINGS.get("BOUNDARY_MARGIN_RATIO", 0.02)))
+        img_hsv = cv2.cvtColor(img_small, cv2.COLOR_BGR2HSV)
 
         for contour in contours:
             area = cv2.contourArea(contour)
@@ -101,11 +109,12 @@ class LogicSpectralInspector:
                 continue
 
             x, y, w, h = cv2.boundingRect(contour)
-            ox = int(x / scale)
-            oy = int(y / scale)
-            ow = max(1, int(w / scale))
-            oh = max(1, int(h / scale))
-            real_area = max(1, int(area / (scale ** 2)))
+
+            # Suppress FFT boundary wrap-around ring artifacts
+            if (x <= boundary_margin or (x + w) >= (proc_w - boundary_margin)) and (w < boundary_margin * 2.5):
+                continue
+            if (y <= boundary_margin or (y + h) >= (proc_h - boundary_margin)) and (h < boundary_margin * 2.5):
+                continue
 
             aspect_ratio = w / max(h, 1)
             hull = cv2.convexHull(contour)
@@ -123,12 +132,29 @@ class LogicSpectralInspector:
             z_distance = abs(roi_mean - mean_sal) / max(std_sal, 1e-6)
             confidence = min(99, max(10, int((z_distance / max(sensitivity, 1e-6)) * 100)))
 
+            geom = extract_defect_geometry(contour, img_small, img_hsv, scale, mm_per_pixel=mm_per_pixel)
+
             self.defects.append({
                 "Type": d_type,
-                "Area (px)": real_area,
+                "Area (px)": geom["area_px"],
                 "Solidity": f"{solidity:.2f}",
                 "Quality Score": f"{confidence}%",
-                "bbox_x": ox, "bbox_y": oy, "bbox_w": ow, "bbox_h": oh,
+                "bbox_x": geom["bbox_x"],
+                "bbox_y": geom["bbox_y"],
+                "bbox_w": geom["bbox_w"],
+                "bbox_h": geom["bbox_h"],
+                "polygon": geom["polygon"],
+                "Perimeter (px)": geom["perimeter_px"],
+                "Circularity": geom["circularity"],
+                "Aspect Ratio": geom["aspect_ratio"],
+                "Major Axis (px)": geom["major_axis_px"],
+                "Minor Axis (px)": geom["minor_axis_px"],
+                "Delta RGB": geom["delta_rgb"],
+                "Delta HSV": geom["delta_hsv"],
+                "Area (mm2)": geom["area_mm2"],
+                "Major Axis (mm)": geom["major_axis_mm"],
+                "Major Axis (in)": geom["major_axis_in"],
+                "Calibrated": geom["calibrated"],
                 "Pipeline": "Logic",
                 "Category": "Structural" if d_type == "Skip/Miss Stitch" else "Surface"
             })

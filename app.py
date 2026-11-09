@@ -15,22 +15,25 @@ from inspectors.unified_processor import unified_processor
 # STRICT TAXONOMY RESTRICTION
 ALLOWED_TYPES = {
     # Pipeline 1 (N)
-    "Oil Stain", "Hole", "Tear",
+    "Oil Stain", "Hole", "Tear", "Puckering",
     # Pipeline 2 (A)
-    "Slub", "Skip/Miss Stitch", "Crooked Stitch", "Skip Stitch", "Broken Stitch", "Run-off Stitch"
+    "Slub", "Skip/Miss Stitch", "Crooked Stitch", "Skip Stitch", "Broken Stitch", "Run-off Stitch",
+    # Pipeline 4 (Texture)
+    "Weave Irregularity", "Snag / Knot"
 }
 
 STRUCTURAL_TYPES = {
-    "Hole", "Tear", "Skip/Miss Stitch", "Crooked Stitch", "Skip Stitch", "Broken Stitch", "Run-off Stitch"
+    "Hole", "Tear", "Skip/Miss Stitch", "Crooked Stitch", "Skip Stitch", "Broken Stitch", "Run-off Stitch", "Weave Irregularity", "Puckering"
 }
 SURFACE_TYPES = {
-    "Oil Stain", "Slub"
+    "Oil Stain", "Slub", "Snag / Knot"
 }
 
 DEFECT_COLORS = {
     "Hole": (60, 60, 255), "Tear": (50, 50, 220), "Skip/Miss Stitch": (80, 80, 240),
     "Crooked Stitch": (200, 0, 200), "Skip Stitch": (150, 0, 150), "Broken Stitch": (100, 0, 100), "Run-off Stitch": (120, 100, 200),
-    "Slub": (30, 180, 255), "Oil Stain": (20, 140, 220),
+    "Slub": (30, 180, 255), "Oil Stain": (20, 140, 220), "Puckering": (180, 130, 70),
+    "Weave Irregularity": (220, 120, 30), "Snag / Knot": (40, 220, 180),
 }
 
 import json
@@ -335,8 +338,8 @@ def save_feedback(entry):
         json.dump(data, f, indent=2)
 
 
-def draw_category_overlay(base_img, defects, color_bgr, label_prefix):
-    """Draw bounding boxes for a list of defects onto a copy of the image."""
+def draw_category_overlay(base_img, defects, color_bgr, label_prefix, style="Both Contours & Boxes", alpha=0.35):
+    """Draw bounding boxes and/or precise polygon contour overlays for defects."""
     overlay = base_img.copy()
     img_h, img_w = overlay.shape[:2]
 
@@ -345,6 +348,7 @@ def draw_category_overlay(base_img, defects, color_bgr, label_prefix):
         by = d.get("bbox_y")
         bw = d.get("bbox_w")
         bh = d.get("bbox_h")
+        poly = d.get("polygon")
 
         if bx is None or by is None or bw is None or bh is None:
             continue
@@ -357,19 +361,31 @@ def draw_category_overlay(base_img, defects, color_bgr, label_prefix):
         if x2 <= x1 or y2 <= y1:
             continue
 
-        # Thick bounding box
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), color_bgr, 3)
+        has_poly = poly is not None and len(poly) >= 3
 
-        # Semi-transparent fill only for small/medium boxes
-        box_area = (x2 - x1) * (y2 - y1)
-        img_area = img_h * img_w
-        if box_area < img_area * 0.15:
-            sub = overlay[y1:y2, x1:x2]
-            if sub.size > 0:
-                fill = np.full_like(sub, color_bgr, dtype=np.uint8)
-                cv2.addWeighted(fill, 0.18, sub, 0.82, 0, sub)
+        # 1. Draw Precise Polygon Mask
+        if style in ["Precise Polygon Contours", "Both Contours & Boxes"] and has_poly:
+            pts = np.array(poly, dtype=np.int32).reshape((-1, 1, 2))
+            pts[:, :, 0] = np.clip(pts[:, :, 0], 0, img_w - 1)
+            pts[:, :, 1] = np.clip(pts[:, :, 1], 0, img_h - 1)
 
-        # Label tag above box
+            poly_layer = overlay.copy()
+            cv2.fillPoly(poly_layer, [pts], color_bgr)
+            cv2.addWeighted(poly_layer, alpha, overlay, 1.0 - alpha, 0, overlay)
+            cv2.polylines(overlay, [pts], True, color_bgr, 2, cv2.LINE_AA)
+
+        # 2. Draw Bounding Box
+        if style in ["Bounding Boxes", "Both Contours & Boxes"] or not has_poly:
+            thick = 2 if (style == "Both Contours & Boxes" and has_poly) else 3
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), color_bgr, thick)
+
+            if not has_poly and (x2 - x1) * (y2 - y1) < (img_h * img_w * 0.15):
+                sub = overlay[y1:y2, x1:x2]
+                if sub.size > 0:
+                    fill = np.full_like(sub, color_bgr, dtype=np.uint8)
+                    cv2.addWeighted(fill, 0.18, sub, 0.82, 0, sub)
+
+        # 3. Label tag above box
         lbl = d.get("Type", "Defect")
         conf = d.get("Quality Score", "")
         tag = f"{lbl} ({conf})" if conf else lbl
@@ -378,7 +394,6 @@ def draw_category_overlay(base_img, defects, color_bgr, label_prefix):
         thickness = 1 if font_scale < 0.55 else 2
         (tw, th), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
 
-        # Background rectangle for text readability
         ty = max(y1 - 6, th + 4)
         cv2.rectangle(overlay, (x1, ty - th - 4), (x1 + tw + 6, ty + 4), color_bgr, -1)
         cv2.putText(overlay, tag, (x1 + 3, ty),
@@ -461,6 +476,43 @@ with tab_inspect:
                                           help="Enable this if uneven lighting is causing false positive defects",
                                           key="shadow_toggle")
 
+            overlay_style = st.selectbox(
+                "Defect Overlay Style",
+                ["Both Contours & Boxes", "Precise Polygon Contours", "Bounding Boxes"],
+                index=0,
+                key="overlay_style_select",
+                help="Toggle between exact polygon contour overlays, traditional bounding boxes, or both"
+            )
+
+            texture_engine = st.selectbox(
+                "Texture Feature Bank (Phase 2)",
+                ["All Combined (Gabor + GLCM + LBP)", "Gabor Filter Bank only", "GLCM Haralick only", "LBP + Entropy only"],
+                index=0,
+                key="texture_engine_select",
+                help="Select classical texture feature extraction bank for inspection & ablation"
+            )
+            mode_map = {
+                "All Combined (Gabor + GLCM + LBP)": "all",
+                "Gabor Filter Bank only": "gabor",
+                "GLCM Haralick only": "glcm",
+                "LBP + Entropy only": "lbp_entropy",
+            }
+            tex_mode = mode_map[texture_engine]
+
+            with st.expander("📏 Physical Calibration (Optional)", expanded=False):
+                st.caption("Enable real-world measurements (mm / inches)")
+                enable_calib = st.checkbox("Enable Physical Scale", value=False, key="calib_enable")
+                mm_per_pixel_ui = None
+                if enable_calib:
+                    calib_mode = st.radio("Scale Input Mode", ["Direct mm/pixel", "Reference Distance"], horizontal=True, key="calib_mode_radio")
+                    if calib_mode == "Direct mm/pixel":
+                        mm_per_pixel_ui = st.number_input("Scale (mm / pixel)", min_value=0.0001, max_value=10.0, value=0.05, step=0.005, format="%.4f", key="calib_direct")
+                    else:
+                        ref_length_mm = st.number_input("Known Length (mm)", min_value=1.0, value=10.0, step=1.0, key="calib_ref_len")
+                        ref_pixels_val = st.number_input("Measured Pixels (px)", min_value=1.0, value=200.0, step=5.0, key="calib_ref_px")
+                        mm_per_pixel_ui = float(ref_length_mm / ref_pixels_val)
+                        st.caption(f"Calculated Scale: `{mm_per_pixel_ui:.4f} mm/px`")
+
     # ── PROCESS ──
     if img_file is not None:
         orig_img, validation_error = validate_image(img_file)
@@ -475,7 +527,14 @@ with tab_inspect:
                 buf = clone_buffer(img_file)
                 
                 progress.progress(0.2, text="🧠  Routing to detection engines…")
-                result = unified_processor.process(buf, sensitivity=detection_threshold, mode="full", remove_shadows=remove_shadows_ui)
+                result = unified_processor.process(
+                    buf,
+                    sensitivity=detection_threshold,
+                    mode="full",
+                    remove_shadows=remove_shadows_ui,
+                    mm_per_pixel=mm_per_pixel_ui,
+                    feature_mode=tex_mode,
+                )
                 
                 progress.progress(0.9, text="📊  Compiling results…")
                 all_defects = result["defects"]
@@ -532,8 +591,8 @@ with tab_inspect:
 
                 base_img = decode_image(img_file)
 
-                structural_overlay = draw_category_overlay(base_img, structural, (113, 113, 248), "S")  # red-ish BGR
-                surface_overlay = draw_category_overlay(base_img, surface, (36, 191, 251), "F")  # yellow BGR
+                structural_overlay = draw_category_overlay(base_img, structural, (113, 113, 248), "S", style=overlay_style)  # red-ish BGR
+                surface_overlay = draw_category_overlay(base_img, surface, (36, 191, 251), "F", style=overlay_style)  # yellow BGR
 
                 c1, c2, c3 = st.columns(3)
                 with c1:
@@ -553,10 +612,10 @@ with tab_inspect:
                 if total > 0:
                     st.markdown('<div class="sec-title">Before / After Comparison</div>', unsafe_allow_html=True)
                     # Merge both overlays into one annotated image
-                    annotated = draw_category_overlay(base_img, structural, (113, 113, 248), "S")
-                    annotated = draw_category_overlay(annotated, surface, (36, 191, 251), "F")
+                    annotated = draw_category_overlay(base_img, structural, (113, 113, 248), "S", style=overlay_style)
+                    annotated = draw_category_overlay(annotated, surface, (36, 191, 251), "F", style=overlay_style)
                     with st.container(border=True):
-                        st.caption("Drag the slider to compare original vs annotated")
+                        st.caption(f"Drag the slider to compare original vs annotated ({overlay_style})")
                         render_comparison_slider(base_img, annotated)
 
                 # ── DIAGNOSTIC MAPS ──
@@ -567,6 +626,10 @@ with tab_inspect:
                     "classical_edge_map": "🔍 Statistical Background Subtraction (Sauvola)",
                     "logic_spectral_map": "📡 Multi-Scale FFT Spectral Residual",
                     "logic_seam_map": "🪡 Hough-Aligned Thread Projection",
+                    "texture_saliency_map": "🧵 Fused Texture Anomaly Saliency Map",
+                    "gabor_saliency_map": "📐 18-Directional Gabor Bank (6 Orientations x 3 Scales)",
+                    "glcm_anomaly_map": "📊 GLCM Haralick Anomaly Grid (4-Feature Z-Score)",
+                    "lbp_entropy_map": "🌀 LBP Uniform + Shannon Entropy Map",
                     "dwt_map": "🧵 DWT (db4) Texture Decomposition",
                     "grayscale_clahe": "🖼️ Grayscale + CLAHE Output",
                     "shadow_removal_mask": "🌑 Shadow Removal Mask",
@@ -576,7 +639,6 @@ with tab_inspect:
                     "multi_scale_saliency_512": "📡 FFT Saliency (512)",
                     "multi_scale_saliency_256": "📡 FFT Saliency (256)",
                     "multi_scale_saliency_128": "📡 FFT Saliency (128)",
-                    "dwt_map": "🧵 DWT (db4) Texture Decomposition",
                     "final_binary_mask": "🔲 Final Binary Mask",
                     "adaptive_threshold_map": "⚖️ Adaptive Threshold Map",
                 }
@@ -611,23 +673,35 @@ with tab_inspect:
                     if structural:
                         st.markdown('<div class="cat-hdr cat-structural">🔴  Structural Defects — Physical Damage</div>', unsafe_allow_html=True)
                         df_s = pd.DataFrame(structural)
-                        preferred = ["Category", "Group", "Engine", "Inspector", "Type", "Area (px)", "Solidity", "Quality Score", "Location"]
-                        cols_order = [c for c in preferred if c in df_s.columns] + [c for c in df_s.columns if c not in preferred and not c.startswith("bbox")]
+                        preferred = [
+                            "ID", "Category", "Type", "Quality Score", "Area (px)", "Perimeter (px)",
+                            "Circularity", "Aspect Ratio", "Major Axis (px)", "Delta RGB", "Delta HSV",
+                            "Area (mm2)", "Major Axis (mm)", "Major Axis (in)", "Solidity", "Pipeline"
+                        ]
+                        cols_order = [c for c in preferred if c in df_s.columns] + [c for c in df_s.columns if c not in preferred and not c.startswith("bbox") and c != "polygon"]
                         with st.container(border=True):
                             st.dataframe(df_s[cols_order], width="stretch")
 
                     if surface:
                         st.markdown('<div class="cat-hdr cat-surface">🟡  Surface Defects — Visual / Textural</div>', unsafe_allow_html=True)
                         df_f = pd.DataFrame(surface)
-                        preferred = ["Category", "Group", "Engine", "Inspector", "Type", "Area (px)", "Solidity", "Quality Score", "Location"]
-                        cols_order = [c for c in preferred if c in df_f.columns] + [c for c in df_f.columns if c not in preferred and not c.startswith("bbox")]
+                        preferred = [
+                            "ID", "Category", "Type", "Quality Score", "Area (px)", "Perimeter (px)",
+                            "Circularity", "Aspect Ratio", "Major Axis (px)", "Delta RGB", "Delta HSV",
+                            "Area (mm2)", "Major Axis (mm)", "Major Axis (in)", "Solidity", "Pipeline"
+                        ]
+                        cols_order = [c for c in preferred if c in df_f.columns] + [c for c in df_f.columns if c not in preferred and not c.startswith("bbox") and c != "polygon"]
                         with st.container(border=True):
                             st.dataframe(df_f[cols_order], width="stretch")
 
                     # Combined download
                     df_all = pd.DataFrame(all_defects)
-                    preferred = ["Category", "Group", "Engine", "Inspector", "Type", "Area (px)", "Solidity", "Quality Score", "Location"]
-                    cols_order = [c for c in preferred if c in df_all.columns] + [c for c in df_all.columns if c not in preferred and not c.startswith("bbox")]
+                    preferred = [
+                        "ID", "Category", "Type", "Quality Score", "Area (px)", "Perimeter (px)",
+                        "Circularity", "Aspect Ratio", "Major Axis (px)", "Delta RGB", "Delta HSV",
+                        "Area (mm2)", "Major Axis (mm)", "Major Axis (in)", "Solidity", "Pipeline"
+                    ]
+                    cols_order = [c for c in preferred if c in df_all.columns] + [c for c in df_all.columns if c not in preferred and not c.startswith("bbox") and c != "polygon"]
                     csv = df_all[cols_order].to_csv(index=False).encode("utf-8")
                     st.download_button("⬇  Download Full Report (CSV)", csv, "parallel_pipeline_fabricqa_report.csv", mime="text/csv")
 

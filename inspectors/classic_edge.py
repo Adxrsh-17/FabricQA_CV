@@ -1,9 +1,10 @@
 # inspectors/classic_edge.py
 import cv2
 import numpy as np
-from typing import Tuple, List, Dict, Any, BinaryIO
+from typing import Tuple, List, Dict, Any, BinaryIO, Optional
 from skimage.filters import threshold_sauvola
-from config import CLASSIC_SETTINGS
+from config import CLASSIC_SETTINGS, GEOMETRY_SETTINGS
+from inspectors.geometry import extract_defect_geometry
 
 class ClassicEdgeInspector:
     """PIPELINE 1: Detects Holes, Tears, and Oil Stains using Adaptive Background Subtraction."""
@@ -42,7 +43,13 @@ class ClassicEdgeInspector:
         bg = cv2.GaussianBlur(img_gray, (151, 151), 0)
         return cv2.subtract(bg, img_blur)
 
-    def detect_defects(self, img_buffer: BinaryIO, sensitivity: float = 2.5, remove_shadows: bool = False) -> Tuple[List[Dict[str, Any]], Dict[str, np.ndarray]]:
+    def detect_defects(
+        self,
+        img_buffer: BinaryIO,
+        sensitivity: float = 2.5,
+        remove_shadows: bool = False,
+        mm_per_pixel: Optional[float] = None,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, np.ndarray]]:
         img, img_small, img_gray, img_hsv, scale = self._preprocess(img_buffer, remove_shadows=remove_shadows)
         diff_map = self._compute_background_subtraction(img_gray)
         
@@ -67,6 +74,7 @@ class ClassicEdgeInspector:
         self.defects = []
         proc_h, proc_w = img_gray.shape[:2]
         img_total_area = proc_h * proc_w
+        margin_px = GEOMETRY_SETTINGS.get("BORDER_MARGIN_PX", 8)
         
         for contour in contours:
             area = cv2.contourArea(contour)
@@ -76,6 +84,10 @@ class ClassicEdgeInspector:
             peri = cv2.arcLength(contour, True)
             approx = cv2.approxPolyDP(contour, 0.015 * peri, True)
             x, y, w, h = cv2.boundingRect(approx)
+
+            # Suppress edge boundary artifacts
+            if (x <= margin_px or y <= margin_px or (x + w) >= (proc_w - margin_px) or (y + h) >= (proc_h - margin_px)) and (w * h < CLASSIC_SETTINGS["HOLE_AREA_MIN"] * 1.5):
+                continue
             
             aspect_ratio = w / max(h, 1)
             hull = cv2.convexHull(contour)
@@ -114,10 +126,12 @@ class ClassicEdgeInspector:
             local_sat_mean = float(np.mean(roi_sat)) if roi_sat.size > 0 else global_sat_mean
             has_sat_shift = (global_sat_mean > 2.0) and (local_sat_mean > global_sat_mean * 1.2)
 
+            geom = extract_defect_geometry(contour, img_small, img_hsv, scale, mm_per_pixel=mm_per_pixel)
+
             is_stain = (solidity > 0.6 and darkness_ratio > 0.50 and not has_torn_edges and (has_sat_shift or texture_ratio > 0.35))
 
-            # Pucker Check: High darkness but low texture variation indicates puckering/shadow, not stain
-            is_pucker = (darkness_ratio > 0.70 and texture_ratio < 0.25 and solidity > 0.8)
+            # Pucker Check: Requires discernible shadow contrast (delta_rgb > 8) and darkness drop
+            is_pucker = (0.40 < darkness_ratio < CLASSIC_SETTINGS["PUCKER_DARKNESS_RATIO"] and texture_ratio < CLASSIC_SETTINGS["PUCKER_TEXTURE_RATIO_MAX"] and solidity > 0.8 and geom["delta_rgb"] > 8.0)
 
             if is_pucker:
                 d_type = "Puckering"
@@ -128,19 +142,27 @@ class ClassicEdgeInspector:
             else:
                 d_type = "Hole"
 
-            orig_h, orig_w = img.shape[:2]
-            ox = max(0, int(x / scale))
-            oy = max(0, int(y / scale))
-            ow = max(1, min(int(w / scale), orig_w - ox))
-            oh = max(1, min(int(h / scale), orig_h - oy))
-            real_area = max(1, int(area / (scale**2)))
-
             self.defects.append({
                 "Type": d_type,
-                "Area (px)": real_area,
+                "Area (px)": geom["area_px"],
                 "Solidity": f"{solidity:.2f}",
                 "Quality Score": f"{int(min(99, 50 + (solidity * 40)))}%",
-                "bbox_x": ox, "bbox_y": oy, "bbox_w": ow, "bbox_h": oh,
+                "bbox_x": geom["bbox_x"],
+                "bbox_y": geom["bbox_y"],
+                "bbox_w": geom["bbox_w"],
+                "bbox_h": geom["bbox_h"],
+                "polygon": geom["polygon"],
+                "Perimeter (px)": geom["perimeter_px"],
+                "Circularity": geom["circularity"],
+                "Aspect Ratio": geom["aspect_ratio"],
+                "Major Axis (px)": geom["major_axis_px"],
+                "Minor Axis (px)": geom["minor_axis_px"],
+                "Delta RGB": geom["delta_rgb"],
+                "Delta HSV": geom["delta_hsv"],
+                "Area (mm2)": geom["area_mm2"],
+                "Major Axis (mm)": geom["major_axis_mm"],
+                "Major Axis (in)": geom["major_axis_in"],
+                "Calibrated": geom["calibrated"],
                 "Pipeline": "Classical",
                 "Category": "Surface" if d_type == "Oil Stain" else "Structural"
             })
