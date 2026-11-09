@@ -91,20 +91,35 @@ SEAM_SETTINGS = {
 }
 
 # ==========================================
-# PIPELINE 4: TEXTURE INSPECTOR
+# PIPELINE 4: TEXTURE INSPECTOR (Gabor + GLCM + LBP/Entropy)
 # ==========================================
 TEXTURE_SETTINGS = {
-    "USE_SAUVOLA_TEXTURE": True,
-    "SAUVOLA_K": 0.2,
-    "SAUVOLA_WINDOW": 151,
+    "IMAGE_RESIZE_WIDTH": 800,
+    "MIN_DEFECT_AREA": 300,
+    "FEATURE_MODE": "all",  # "lbp_entropy", "gabor", "glcm", "all"
+    "FUSION_METHOD": "max",  # "max" or "weighted_sum"
+    # Gabor Filter Bank: 6 orientations x 3 scales = 18 filters
+    "GABOR_ORIENTATIONS": [0, np.pi / 6, np.pi / 3, np.pi / 2, 2 * np.pi / 3, 5 * np.pi / 6],
+    "GABOR_SCALES": [4.0, 8.0, 16.0],  # Wavelengths (lambda)
+    "GABOR_KSIZE": 21,
+    "GABOR_GAMMA": 0.5,
+    "GABOR_PSI": 0.0,
+    # LBP + Local Entropy
+    "LBP_POINTS": 8,
+    "LBP_RADIUS": 1,
+    "ENTROPY_DISK_RADIUS": 5,
 }
 
 # ==========================================
 # GLCM SETTINGS (for texture inspector)
 # ==========================================
 GLCM_SETTINGS = {
-    "DISTANCES": [1],
-    "ANGLES": [0, np.pi / 2],
+    "WINDOW_SIZE": 32,
+    "STEP_SIZE": 16,
+    "NUM_LEVELS": 32,  # Configurable gray levels: 16, 32, 64
+    "DISTANCES": [1, 2],
+    "ANGLES": [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4],
+    "FEATURES": ["contrast", "correlation", "energy", "homogeneity"],
     "THRESHOLDS": {
         "contrast_max": 250,
         "correlation_min": 0.80,

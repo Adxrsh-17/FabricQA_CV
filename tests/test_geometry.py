@@ -93,3 +93,4 @@ def test_unified_processor_passes_polygon_and_calibration():
     assert "Delta RGB" in d0
     assert d0["Calibrated"] is True
     assert d0["Area (mm2)"] is not None
+

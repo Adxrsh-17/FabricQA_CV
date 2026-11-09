@@ -157,3 +157,4 @@ def extract_defect_geometry(
         "delta_hsv": color_metrics["delta_hsv"],
         **physical_metrics,
     }
+
