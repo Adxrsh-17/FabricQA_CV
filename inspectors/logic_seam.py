@@ -33,7 +33,10 @@ class LogicSeamInspector:
 
         angles: List[float] = []
         for line in lines:
-            x1, y1, x2, y2 = line[0]
+            pts = np.asarray(line).reshape(-1)
+            if len(pts) < 4:
+                continue
+            x1, y1, x2, y2 = pts[:4]
             angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
             if abs(angle) < 45 and abs(angle) > 0.5:
                 angles.append(angle)
@@ -244,9 +247,17 @@ class LogicSeamInspector:
         rot_img, _ = self._deskew(img_gray)
         thread_mask, proj = self._extract_stitch_mask(rot_img)
 
+        viz_maps = {
+            "logic_seam_map": rot_img,
+            "grayscale_clahe": img_gray,
+            "projection_profile": proj,
+            "binary_thread_mask": thread_mask,
+            "deskewed_image": rot_img,
+        }
+
         stitch_density = np.count_nonzero(thread_mask) / max(thread_mask.shape[0] * thread_mask.shape[1], 1)
         if stitch_density < 0.015 or stitch_density > 0.35:
-            return [], rot_img
+            return [], viz_maps
 
         all_raw = self._detect_projection_defects(proj, rot_img) + self._detect_crooked(thread_mask) + self._detect_puckering(proj, rot_img)
 
