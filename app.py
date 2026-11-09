@@ -15,22 +15,25 @@ from inspectors.unified_processor import unified_processor
 # STRICT TAXONOMY RESTRICTION
 ALLOWED_TYPES = {
     # Pipeline 1 (N)
-    "Oil Stain", "Hole", "Tear",
+    "Oil Stain", "Hole", "Tear", "Puckering",
     # Pipeline 2 (A)
-    "Slub", "Skip/Miss Stitch", "Crooked Stitch", "Skip Stitch", "Broken Stitch", "Run-off Stitch"
+    "Slub", "Skip/Miss Stitch", "Crooked Stitch", "Skip Stitch", "Broken Stitch", "Run-off Stitch",
+    # Pipeline 4 (Texture)
+    "Weave Irregularity", "Snag / Knot"
 }
 
 STRUCTURAL_TYPES = {
-    "Hole", "Tear", "Skip/Miss Stitch", "Crooked Stitch", "Skip Stitch", "Broken Stitch", "Run-off Stitch"
+    "Hole", "Tear", "Skip/Miss Stitch", "Crooked Stitch", "Skip Stitch", "Broken Stitch", "Run-off Stitch", "Weave Irregularity", "Puckering"
 }
 SURFACE_TYPES = {
-    "Oil Stain", "Slub"
+    "Oil Stain", "Slub", "Snag / Knot"
 }
 
 DEFECT_COLORS = {
     "Hole": (60, 60, 255), "Tear": (50, 50, 220), "Skip/Miss Stitch": (80, 80, 240),
     "Crooked Stitch": (200, 0, 200), "Skip Stitch": (150, 0, 150), "Broken Stitch": (100, 0, 100), "Run-off Stitch": (120, 100, 200),
-    "Slub": (30, 180, 255), "Oil Stain": (20, 140, 220),
+    "Slub": (30, 180, 255), "Oil Stain": (20, 140, 220), "Puckering": (180, 130, 70),
+    "Weave Irregularity": (220, 120, 30), "Snag / Knot": (40, 220, 180),
 }
 
 import json
@@ -481,6 +484,21 @@ with tab_inspect:
                 help="Toggle between exact polygon contour overlays, traditional bounding boxes, or both"
             )
 
+            texture_engine = st.selectbox(
+                "Texture Feature Bank (Phase 2)",
+                ["All Combined (Gabor + GLCM + LBP)", "Gabor Filter Bank only", "GLCM Haralick only", "LBP + Entropy only"],
+                index=0,
+                key="texture_engine_select",
+                help="Select classical texture feature extraction bank for inspection & ablation"
+            )
+            mode_map = {
+                "All Combined (Gabor + GLCM + LBP)": "all",
+                "Gabor Filter Bank only": "gabor",
+                "GLCM Haralick only": "glcm",
+                "LBP + Entropy only": "lbp_entropy",
+            }
+            tex_mode = mode_map[texture_engine]
+
             with st.expander("📏 Physical Calibration (Optional)", expanded=False):
                 st.caption("Enable real-world measurements (mm / inches)")
                 enable_calib = st.checkbox("Enable Physical Scale", value=False, key="calib_enable")
@@ -515,6 +533,7 @@ with tab_inspect:
                     mode="full",
                     remove_shadows=remove_shadows_ui,
                     mm_per_pixel=mm_per_pixel_ui,
+                    feature_mode=tex_mode,
                 )
                 
                 progress.progress(0.9, text="📊  Compiling results…")
@@ -607,6 +626,10 @@ with tab_inspect:
                     "classical_edge_map": "🔍 Statistical Background Subtraction (Sauvola)",
                     "logic_spectral_map": "📡 Multi-Scale FFT Spectral Residual",
                     "logic_seam_map": "🪡 Hough-Aligned Thread Projection",
+                    "texture_saliency_map": "🧵 Fused Texture Anomaly Saliency Map",
+                    "gabor_saliency_map": "📐 18-Directional Gabor Bank (6 Orientations x 3 Scales)",
+                    "glcm_anomaly_map": "📊 GLCM Haralick Anomaly Grid (4-Feature Z-Score)",
+                    "lbp_entropy_map": "🌀 LBP Uniform + Shannon Entropy Map",
                     "dwt_map": "🧵 DWT (db4) Texture Decomposition",
                     "grayscale_clahe": "🖼️ Grayscale + CLAHE Output",
                     "shadow_removal_mask": "🌑 Shadow Removal Mask",
@@ -616,7 +639,6 @@ with tab_inspect:
                     "multi_scale_saliency_512": "📡 FFT Saliency (512)",
                     "multi_scale_saliency_256": "📡 FFT Saliency (256)",
                     "multi_scale_saliency_128": "📡 FFT Saliency (128)",
-                    "dwt_map": "🧵 DWT (db4) Texture Decomposition",
                     "final_binary_mask": "🔲 Final Binary Mask",
                     "adaptive_threshold_map": "⚖️ Adaptive Threshold Map",
                 }
