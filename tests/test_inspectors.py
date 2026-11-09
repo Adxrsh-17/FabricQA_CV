@@ -74,3 +74,4 @@ def test_unified_processor_contract():
     assert "summary" in result
     assert isinstance(result["defects"], list)
     assert isinstance(result["viz_maps"], dict)
+
